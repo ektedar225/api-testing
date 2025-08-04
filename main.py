@@ -1,49 +1,49 @@
+# main.py
 from fastapi import FastAPI
 from pydantic import BaseModel
-from azure.ai.inference import ChatCompletionsClient
-from azure.ai.inference.models import SystemMessage, UserMessage
-from azure.core.credentials import AzureKeyCredential
 from fastapi.middleware.cors import CORSMiddleware
 import os
-
-# Load token from environment
-token = os.getenv("AZURE_INFERENCE_API_KEY")  # set in Railway environment variable
-endpoint = "https://models.github.ai/inference"
-model = "openai/gpt-4.1"
-
-# Initialize Azure inference client
-client = ChatCompletionsClient(
-    endpoint=endpoint,
-    credential=AzureKeyCredential(token),
-)
+import requests
 
 app = FastAPI()
 
-# Enable CORS if accessing from frontend
+# CORS for any origin (lock down in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict to frontend URL in production
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Request body format
+# Pull in your GitHub token from Railway’s env variables
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  
+if not GITHUB_TOKEN:
+    raise RuntimeError("GITHUB_TOKEN not set")
+
+ENDPOINT = "https://models.github.ai/inference"
+MODEL    = "openai/gpt-4.1"
+
 class ChatRequest(BaseModel):
     message: str
 
 @app.post("/chat")
-async def chat(chat_req: ChatRequest):
-    try:
-        response = client.complete(
-            messages=[
-                SystemMessage("You are a helpful assistant."),
-                UserMessage(chat_req.message)
-            ],
-            temperature=1,
-            top_p=1,
-            model=model
-        )
-        return {"response": response.choices[0].message.content}
-    except Exception as e:
-        return {"error": str(e)}
+async def chat(req: ChatRequest):
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", content:= ""},
+            {"role": "user",   "content": req.message}
+        ],
+        "temperature": 1,
+        "top_p": 1
+    }
+
+    r = requests.post(f"{ENDPOINT}/chat/completions", json=payload, headers=headers, timeout=15)
+    r.raise_for_status()  # will raise HTTPError on 4xx/5xx
+    data = r.json()
+    # unwrap to match your old FastAPI response
+    return {"response": data["choices"][0]["message"]["content"]}
