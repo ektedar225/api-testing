@@ -1,13 +1,11 @@
-# main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-import os
-import requests
+import os, requests
 
 app = FastAPI()
 
-# CORS for any origin (lock down in production)
+# CORS (adjust origins in prod)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,10 +13,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pull in your GitHub token from Railway’s env variables
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 if not GITHUB_TOKEN:
-    raise RuntimeError("GITHUB_TOKEN not set")
+    raise RuntimeError("GITHUB_TOKEN not set in environment")
 
 ENDPOINT = "https://models.github.ai/inference"
 MODEL    = "openai/gpt-4.1"
@@ -35,15 +32,25 @@ async def chat(req: ChatRequest):
     payload = {
         "model": MODEL,
         "messages": [
-            {"role": "system", content:= ""},
+            {"role": "system", "content": ""},    # empty system prompt
             {"role": "user",   "content": req.message}
         ],
         "temperature": 1,
         "top_p": 1
     }
 
-    r = requests.post(f"{ENDPOINT}/chat/completions", json=payload, headers=headers, timeout=15)
-    r.raise_for_status()  # will raise HTTPError on 4xx/5xx
+    try:
+        r = requests.post(
+            f"{ENDPOINT}/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=15
+        )
+        r.raise_for_status()
+    except requests.RequestException as e:
+        # bubble up a 502 with the underlying message
+        raise HTTPException(status_code=502, detail=str(e))
+
     data = r.json()
-    # unwrap to match your old FastAPI response
+    # unwrap and return
     return {"response": data["choices"][0]["message"]["content"]}
